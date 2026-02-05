@@ -12,111 +12,128 @@ from backtester import backtest_strategy
 import MetaTrader5 as mt5
 import pandas as pd
 import os
+from trader import place_trade, get_open_positions
 
-# ---------------- CONFIG ----------------
+def run_strategy():
 
-symbol = "XAUUSD"
-bars = 10000
+    # ---------------- CONFIG ----------------
 
-timeframes = {
-    "M1": mt5.TIMEFRAME_M1,
-    "M5": mt5.TIMEFRAME_M5,
-    "M15": mt5.TIMEFRAME_M15,
-    "H1": mt5.TIMEFRAME_H1
-}
+    symbol = "XAUUSD"
+    bars = 10000
 
-os.makedirs("enriched_data", exist_ok=True)
+    timeframes = {
+        "M1": mt5.TIMEFRAME_M1,
+        "M5": mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
+        "H1": mt5.TIMEFRAME_H1
+    }
 
-# ---------------- CONNECT MT5 ----------------
+    os.makedirs("enriched_data", exist_ok=True)
 
-if not connect_mt5():
-    raise RuntimeError("MT5 connection failed")
+    # ---------------- CONNECT MT5 ----------------
 
-# =========================================================
-# STEP 1 → FETCH + STRUCTURE BUILD
-# =========================================================
+    if not connect_mt5():
+        raise RuntimeError("MT5 connection failed")
 
-for tf_name, tf_value in timeframes.items():
+    # =========================================================
+    # STEP 1 → FETCH + STRUCTURE BUILD
+    # =========================================================
 
-    print(f"\n📥 Fetching {symbol} | {tf_name}")
+    for tf_name, tf_value in timeframes.items():
 
-    df = fetch_data(symbol, tf_value, bars)
+        print(f"\n📥 Fetching {symbol} | {tf_name}")
 
-    if df is None or df.empty:
-        print(f"⚠ Skipping {tf_name}")
-        continue
+        df = fetch_data(symbol, tf_value, bars)
 
-    df = add_moving_averages(df)
-    df = add_rsi(df)
-    df = add_macd(df)
-    df = add_atr(df)
+        if df is None or df.empty:
+            print(f"⚠ Skipping {tf_name}")
+            continue
 
-    df = detect_trend(df)
-    df = support_resistance(df)
+        df = add_moving_averages(df)
+        df = add_rsi(df)
+        df = add_macd(df)
+        df = add_atr(df)
 
-    df = detect_swings(df)
-    df = detect_bos_choch(df)
+        df = detect_trend(df)
+        df = support_resistance(df)
 
-    filename = f"enriched_data/{symbol}_{tf_name}_structure.csv"
-    df.to_csv(filename, index=False)
+        df = detect_swings(df)
+        df = detect_bos_choch(df)
 
-    print(f"✅ Saved structure → {filename}")
+        filename = f"enriched_data/{symbol}_{tf_name}_structure.csv"
+        df.to_csv(filename, index=False)
 
-# =========================================================
-# STEP 2 → SMART MONEY ALIGNMENT
-# =========================================================
+        print(f"✅ Saved structure → {filename}")
 
-print("\n🧠 Running Smart Money Alignment")
+    # =========================================================
+    # STEP 2 → SMART MONEY ALIGNMENT
+    # =========================================================
 
-h1_path = f"enriched_data/{symbol}_H1_structure.csv"
-m15_path = f"enriched_data/{symbol}_M15_structure.csv"
+    print("\n🧠 Running Smart Money Alignment")
 
-if not os.path.exists(h1_path) or not os.path.exists(m15_path):
-    raise RuntimeError("Required structure files missing")
+    h1_path = f"enriched_data/{symbol}_H1_structure.csv"
+    m15_path = f"enriched_data/{symbol}_M15_structure.csv"
 
-# Load datasets
-h1_df = pd.read_csv(h1_path)
-m15_structure_df = pd.read_csv(m15_path)
+    if not os.path.exists(h1_path) or not os.path.exists(m15_path):
+        raise RuntimeError("Required structure files missing")
 
-# Alignment
-m15_smart_df = align_htf_structure(m15_structure_df, h1_df)
+    # Load datasets
+    h1_df = pd.read_csv(h1_path)
+    m15_structure_df = pd.read_csv(m15_path)
 
-# Smart Money Features
-m15_smart_df = detect_liquidity_sweep(m15_smart_df)
-m15_smart_df = detect_engulfing(m15_smart_df)
-m15_smart_df = detect_fvg(m15_smart_df)
+    # Alignment
+    m15_smart_df = align_htf_structure(m15_structure_df, h1_df)
 
-# Debug Guard
-if 'structure_HTF' not in m15_smart_df.columns:
-    raise RuntimeError("HTF alignment failed")
+    # Smart Money Features
+    m15_smart_df = detect_liquidity_sweep(m15_smart_df)
+    m15_smart_df = detect_engulfing(m15_smart_df)
+    m15_smart_df = detect_fvg(m15_smart_df)
 
-smart_file = f"enriched_data/{symbol}_M15_smart_money.csv"
-m15_smart_df.to_csv(smart_file, index=False)
+    # Debug Guard
+    if 'structure_HTF' not in m15_smart_df.columns:
+        raise RuntimeError("HTF alignment failed")
 
-print(f"✅ Smart Money dataset saved → {smart_file}")
+    smart_file = f"enriched_data/{symbol}_M15_smart_money.csv"
+    m15_smart_df.to_csv(smart_file, index=False)
 
-# =========================================================
-# STEP 3 → SIGNAL GENERATION
-# =========================================================
+    print(f"✅ Smart Money dataset saved → {smart_file}")
 
-m15_signal_df = generate_signals(m15_smart_df)
+    # =========================================================
+    # STEP 3 → SIGNAL GENERATION
+    # =========================================================
 
-signal_file = f"enriched_data/{symbol}_M15_signals.csv"
-m15_signal_df.to_csv(signal_file, index=False)
+    m15_signal_df = generate_signals(m15_smart_df)
 
-print(f"✅ Signals saved → {signal_file}")
+    signal_file = f"enriched_data/{symbol}_M15_signals.csv"
+    m15_signal_df.to_csv(signal_file, index=False)
 
-# =========================================================
-# STEP 4 → BACKTEST
-# =========================================================
+    print(f"✅ Signals saved → {signal_file}")
 
-results = backtest_strategy(m15_signal_df)
+    # ---------------- LIVE DEMO EXECUTION ----------------
 
-print("\n📊 BACKTEST RESULTS")
-for k, v in results.items():
-    print(f"{k}: {v}")
+    latest_signal = m15_signal_df.iloc[-1]
 
-# ---------------- SHUTDOWN ----------------
+    open_positions = get_open_positions(symbol)
 
-mt5.shutdown()
-print("\n🔌 MT5 connection closed")
+    if not open_positions:
+        place_trade(symbol, latest_signal)
+    else:
+        print("⚠ Position already open — skipping trade")
+        
+    # =========================================================
+    # STEP 4 → BACKTEST
+    # =========================================================
+
+    results = backtest_strategy(m15_signal_df)
+
+    print("\n📊 BACKTEST RESULTS")
+    for k, v in results.items():
+        print(f"{k}: {v}")
+
+    # ---------------- SHUTDOWN ----------------
+
+    mt5.shutdown()
+    print("\n🔌 MT5 connection closed")
+    
+if __name__ == "__main__":
+    run_strategy()

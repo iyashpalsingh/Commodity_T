@@ -16,7 +16,7 @@ import os
 # ---------------- CONFIG ----------------
 
 symbol = "XAUUSD"
-bars = 2000
+bars = 10000
 
 timeframes = {
     "M1": mt5.TIMEFRAME_M1,
